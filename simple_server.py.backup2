@@ -1,0 +1,119 @@
+"""
+간단한 Flask 서버
+- 영화 검색 API
+- 영화 상세 정보 API
+- 프론트엔드 렌더링
+"""
+from flask import Flask, jsonify, request, render_template
+import requests
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+API_KEY = os.getenv('TMDB_API_KEY')
+BASE_URL = 'https://api.themoviedb.org/3'
+
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    """메인 페이지 렌더링"""
+    return render_template('index.html')
+
+@app.route('/api/search')
+def search_movies():
+    """영화 검색 API"""
+    query = request.args.get('q', '')
+    
+    if not query:
+        return jsonify({'error': '검색어를 입력해주세요'}), 400
+    
+    url = f"{BASE_URL}/search/movie"
+    params = {
+        'api_key': API_KEY,
+        'query': query,
+        'language': 'ko-KR',
+        'page': 1
+    }
+    
+    try:
+        response = requests.get(url, params=params, timeout=5)
+        data = response.json()
+        
+        movies = []
+        for movie in data.get('results', [])[:10]:
+            movies.append({
+                'id': movie['id'],
+                'title': movie['title'],
+                'original_title': movie.get('original_title', ''),
+                'overview': movie.get('overview', ''),
+                'release_date': movie.get('release_date', ''),
+                'vote_average': movie.get('vote_average', 0),
+                'poster_path': f"https://image.tmdb.org/t/p/w500{movie['poster_path']}" if movie.get('poster_path') else None
+            })
+        
+        return jsonify({
+            'query': query,
+            'total_results': data.get('total_results', 0),
+            'results': movies
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/movie/<int:movie_id>')
+def get_movie_details(movie_id):
+    """영화 상세 정보 API"""
+    url = f"{BASE_URL}/movie/{movie_id}"
+    params = {
+        'api_key': API_KEY,
+        'language': 'ko-KR',
+        'append_to_response': 'credits'
+    }
+    
+    try:
+        response = requests.get(url, params=params, timeout=5)
+        movie = response.json()
+        
+        genres = [g['name'] for g in movie.get('genres', [])]
+        
+        directors = []
+        if 'credits' in movie and 'crew' in movie['credits']:
+            directors = [
+                crew['name'] for crew in movie['credits']['crew']
+                if crew['job'] == 'Director'
+            ]
+        
+        cast = []
+        if 'credits' in movie and 'cast' in movie['credits']:
+            cast = [
+                actor['name'] for actor in movie['credits']['cast'][:5]
+            ]
+        
+        result = {
+            'id': movie['id'],
+            'title': movie['title'],
+            'original_title': movie.get('original_title', ''),
+            'overview': movie.get('overview', ''),
+            'release_date': movie.get('release_date', ''),
+            'vote_average': movie.get('vote_average', 0),
+            'runtime': movie.get('runtime', 0),
+            'genres': genres,
+            'directors': directors,
+            'cast': cast,
+            'poster_path': f"https://image.tmdb.org/t/p/w500{movie['poster_path']}" if movie.get('poster_path') else None
+        }
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+if __name__ == '__main__':
+    print("\n🎬 영화 검색 웹 서비스 시작!")
+    print("=" * 50)
+    print("브라우저에서 열기: http://localhost:5001")
+    print("=" * 50)
+    print("\n종료: Ctrl + C\n")
+    
+    app.run(debug=True, host='0.0.0.0', port=5001)

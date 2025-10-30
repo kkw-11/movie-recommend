@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>영화 추천 시스템</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .movie-card {
+            transition: transform 0.2s;
+        }
+        .movie-card:hover {
+            transform: translateY(-5px);
+        }
+        .selected {
+            border: 3px solid #3b82f6;
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-white">
+    <div class="container mx-auto px-4 py-8 max-w-7xl">
+        
+        <!-- 헤더 -->
+        <header class="text-center mb-12">
+            <h1 class="text-5xl font-bold mb-4">🎬 영화 추천 시스템</h1>
+            <p class="text-xl text-gray-400">좋아하는 영화를 3개 이상 선택하고 추천받으세요</p>
+        </header>
+
+        <!-- Step 1: 영화 검색 및 선택 -->
+        <div id="step1" class="mb-12">
+            <div class="bg-gray-800 rounded-lg p-8">
+                <h2 class="text-3xl font-bold mb-6">1단계: 좋아하는 영화 선택</h2>
+                
+                <!-- 검색창 -->
+                <div class="mb-8">
+                    <input 
+                        type="text" 
+                        id="searchInput"
+                        placeholder="영화 제목을 검색하세요... (예: 인셉션, 타이타닉)"
+                        class="w-full px-6 py-4 bg-gray-700 rounded-lg text-white text-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                    <div id="searchStatus" class="mt-2 text-sm text-gray-400"></div>
+                </div>
+
+                <!-- 검색 결과 -->
+                <div id="searchResults" class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4 mb-8"></div>
+
+                <!-- 선택한 영화 -->
+                <div id="selectedSection" class="hidden">
+                    <h3 class="text-2xl font-bold mb-4">
+                        선택한 영화 (<span id="selectedCount">0</span>개)
+                    </h3>
+                    <div id="selectedMovies" class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4 mb-6"></div>
+                    
+                    <button 
+                        id="getRecommendationsBtn"
+                        class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 px-8 rounded-lg text-xl disabled:opacity-50 disabled:cursor-not-allowed"
+                        disabled
+                    >
+                        추천 받기 (최소 3개 선택)
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Step 2: 추천 결과 -->
+        <div id="step2" class="hidden">
+            <div class="bg-gray-800 rounded-lg p-8">
+                <div class="flex justify-between items-center mb-8">
+                    <h2 class="text-3xl font-bold">🎯 추천 영화</h2>
+                    <button 
+                        id="resetBtn"
+                        class="bg-gray-700 hover:bg-gray-600 text-white font-bold py-2 px-6 rounded-lg"
+                    >
+                        다시 선택하기
+                    </button>
+                </div>
+
+                <!-- 로딩 -->
+                <div id="loading" class="text-center py-12">
+                    <div class="inline-block animate-spin rounded-full h-16 w-16 border-t-2 border-b-2 border-blue-500"></div>
+                    <p class="mt-4 text-xl text-gray-400">추천 영화를 찾고 있습니다...</p>
+                </div>
+
+                <!-- 추천 결과 -->
+                <div id="recommendations" class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4 hidden"></div>
+            </div>
+        </div>
+
+        <!-- 영화 상세 정보 모달 -->
+        <div id="movieModal" class="hidden fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center p-4 z-50">
+            <div class="bg-gray-800 rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+                <div id="movieDetails" class="p-6"></div>
+                <div class="p-6 pt-0">
+                    <button 
+                        onclick="closeModal()"
+                        class="w-full bg-gray-700 hover:bg-gray-600 text-white font-bold py-3 px-6 rounded-lg"
+                    >
+                        닫기
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let searchTimeout = null;
+        let selectedMovies = new Set();
+
+        const searchInput = document.getElementById('searchInput');
+        const searchResults = document.getElementById('searchResults');
+        const searchStatus = document.getElementById('searchStatus');
+        const selectedSection = document.getElementById('selectedSection');
+        const selectedMoviesList = document.getElementById('selectedMovies');
+        const selectedCount = document.getElementById('selectedCount');
+        const getRecommendationsBtn = document.getElementById('getRecommendationsBtn');
+        const step1 = document.getElementById('step1');
+        const step2 = document.getElementById('step2');
+        const loading = document.getElementById('loading');
+        const recommendations = document.getElementById('recommendations');
+        const resetBtn = document.getElementById('resetBtn');
+        const movieModal = document.getElementById('movieModal');
+        const movieDetails = document.getElementById('movieDetails');
+
+        // 검색
+        searchInput.addEventListener('input', (e) => {
+            clearTimeout(searchTimeout);
+            const query = e.target.value.trim();
+
+            if (query.length < 2) {
+                searchResults.innerHTML = '';
+                searchStatus.textContent = '';
+                return;
+            }
+
+            searchStatus.textContent = '검색 중...';
+
+            searchTimeout = setTimeout(() => {
+                searchMovies(query);
+            }, 500);
+        });
+
+        // 영화 검색
+        async function searchMovies(query) {
+            try {
+                const response = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
+                const data = await response.json();
+
+                if (data.results && data.results.length > 0) {
+                    searchStatus.textContent = `${data.total_results}개의 결과`;
+                    displaySearchResults(data.results);
+                } else {
+                    searchStatus.textContent = '검색 결과가 없습니다';
+                    searchResults.innerHTML = '';
+                }
+            } catch (error) {
+                console.error('검색 오류:', error);
+                searchStatus.textContent = '검색 중 오류가 발생했습니다';
+            }
+        }
+
+        // 검색 결과 표시
+        function displaySearchResults(movies) {
+            searchResults.innerHTML = movies.map(movie => `
+                <div class="movie-card cursor-pointer ${selectedMovies.has(movie.id) ? 'selected' : ''}" 
+                     onclick="toggleMovie(${movie.id}, '${movie.title.replace(/'/g, "\\'")}', '${movie.poster_path || ''}', ${movie.vote_average})">
+                    <div class="bg-gray-700 rounded-lg overflow-hidden relative">
+                        ${selectedMovies.has(movie.id) ? 
+                            '<div class="absolute top-2 right-2 bg-blue-600 text-white rounded-full w-8 h-8 flex items-center justify-center text-xl">✓</div>' : ''
+                        }
+                        ${movie.poster_path ? 
+                            `<img src="${movie.poster_path}" alt="${movie.title}" class="w-full h-64 object-cover">` :
+                            `<div class="w-full h-64 bg-gray-600 flex items-center justify-center text-gray-400">
+                                <span class="text-4xl">🎬</span>
+                            </div>`
+                        }
+                        <div class="p-3">
+                            <h3 class="font-bold text-sm truncate mb-1">${movie.title}</h3>
+                            <p class="text-yellow-400 text-sm">⭐ ${movie.vote_average.toFixed(1)}</p>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // 영화 선택/해제
+        function toggleMovie(id, title, poster, rating) {
+            if (selectedMovies.has(id)) {
+                selectedMovies.delete(id);
+            } else {
+                selectedMovies.add(id);
+            }
+            
+            // 선택한 영화 정보 저장
+            if (!window.selectedMoviesData) {
+                window.selectedMoviesData = {};
+            }
+            if (!selectedMovies.has(id)) {
+                delete window.selectedMoviesData[id];
+            } else {
+                window.selectedMoviesData[id] = { id, title, poster, rating };
+            }
+
+            updateUI();
+        }
+
+        // UI 업데이트
+        function updateUI() {
+            selectedCount.textContent = selectedMovies.size;
+            
+            // 선택한 영화 섹션 표시/숨김
+            if (selectedMovies.size > 0) {
+                selectedSection.classList.remove('hidden');
+                updateSelectedMovies();
+            } else {
+                selectedSection.classList.add('hidden');
+            }
+
+            // 추천 버튼 활성화/비활성화
+            getRecommendationsBtn.disabled = selectedMovies.size < 3;
+            if (selectedMovies.size < 3) {
+                getRecommendationsBtn.textContent = `추천 받기 (${selectedMovies.size}/3)`;
+            } else {
+                getRecommendationsBtn.textContent = `추천 받기 (${selectedMovies.size}개 선택됨)`;
+            }
+
+            // 검색 결과 업데이트
+            displaySearchResults(
+                Array.from(document.querySelectorAll('#searchResults .movie-card'))
+                    .map(el => {
+                        const id = parseInt(el.getAttribute('onclick').match(/\d+/)[0]);
+                        return { 
+                            id,
+                            selected: selectedMovies.has(id)
+                        };
+                    })
+            );
+        }
+
+        // 선택한 영화 목록 표시
+        function updateSelectedMovies() {
+            const movies = Array.from(selectedMovies).map(id => window.selectedMoviesData[id]);
+            
+            selectedMoviesList.innerHTML = movies.map(movie => `
+                <div class="bg-gray-700 rounded-lg overflow-hidden relative">
+                    <button 
+                        onclick="toggleMovie(${movie.id}, '${movie.title.replace(/'/g, "\\'")}', '${movie.poster}', ${movie.rating})"
+                        class="absolute top-2 right-2 bg-red-600 hover:bg-red-700 text-white rounded-full w-8 h-8 flex items-center justify-center z-10"
+                    >
+                        ✕
+                    </button>
+                    ${movie.poster ? 
+                        `<img src="${movie.poster}" alt="${movie.title}" class="w-full h-64 object-cover">` :
+                        `<div class="w-full h-64 bg-gray-600 flex items-center justify-center text-gray-400">
+                            <span class="text-4xl">🎬</span>
+                        </div>`
+                    }
+                    <div class="p-3">
+                        <h3 class="font-bold text-sm truncate">${movie.title}</h3>
+                        <p class="text-yellow-400 text-sm">⭐ ${movie.rating.toFixed(1)}</p>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // 추천 받기
+        getRecommendationsBtn.addEventListener('click', async () => {
+            step1.classList.add('hidden');
+            step2.classList.remove('hidden');
+            loading.classList.remove('hidden');
+            recommendations.classList.add('hidden');
+
+            try {
+                const response = await fetch('/api/recommend', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        movie_ids: Array.from(selectedMovies)
+                    })
+                });
+
+                const data = await response.json();
+                
+                loading.classList.add('hidden');
+                recommendations.classList.remove('hidden');
+                displayRecommendations(data.recommendations);
+            } catch (error) {
+                console.error('추천 오류:', error);
+                alert('추천을 받는 중 오류가 발생했습니다');
+            }
+        });
+
+        // 추천 결과 표시
+        function displayRecommendations(movies) {
+            recommendations.innerHTML = movies.map(movie => `
+                <div class="movie-card cursor-pointer" onclick="showMovieDetails(${movie.id})">
+                    <div class="bg-gray-700 rounded-lg overflow-hidden">
+                        ${movie.poster_path ? 
+                            `<img src="${movie.poster_path}" alt="${movie.title}" class="w-full h-64 object-cover">` :
+                            `<div class="w-full h-64 bg-gray-600 flex items-center justify-center text-gray-400">
+                                <span class="text-4xl">🎬</span>
+                            </div>`
+                        }
+                        <div class="p-3">
+                            <h3 class="font-bold text-sm truncate mb-1">${movie.title}</h3>
+                            <p class="text-yellow-400 text-sm">⭐ ${movie.vote_average.toFixed(1)}</p>
+                            <p class="text-xs text-gray-400">${movie.genres.slice(0, 2).join(', ')}</p>
+                            <p class="text-xs text-blue-400 mt-1">유사도: ${(movie.similarity_score * 100).toFixed(0)}%</p>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // 영화 상세 정보
+        async function showMovieDetails(movieId) {
+            try {
+                const response = await fetch(`/api/movie/${movieId}`);
+                const movie = await response.json();
+
+                movieDetails.innerHTML = `
+                    <div class="space-y-4">
+                        ${movie.poster_path ? 
+                            `<img src="${movie.poster_path}" alt="${movie.title}" class="w-full max-h-96 object-contain rounded-lg">` :
+                            ''
+                        }
+                        
+                        <h2 class="text-3xl font-bold">${movie.title}</h2>
+                        
+                        ${movie.original_title !== movie.title ? 
+                            `<p class="text-gray-400">${movie.original_title}</p>` : ''
+                        }
+                        
+                        <div class="flex items-center space-x-4 text-sm">
+                            <span class="text-yellow-400">⭐ ${movie.vote_average.toFixed(1)}</span>
+                            <span class="text-gray-400">${movie.release_date}</span>
+                            <span class="text-gray-400">${movie.runtime}분</span>
+                        </div>
+                        
+                        ${movie.genres.length > 0 ? 
+                            `<div class="flex flex-wrap gap-2">
+                                ${movie.genres.map(genre => 
+                                    `<span class="bg-blue-600 px-3 py-1 rounded-full text-sm">${genre}</span>`
+                                ).join('')}
+                            </div>` : ''
+                        }
+                        
+                        ${movie.directors.length > 0 ? 
+                            `<div>
+                                <h3 class="font-bold mb-2">감독</h3>
+                                <p class="text-gray-300">${movie.directors.join(', ')}</p>
+                            </div>` : ''
+                        }
+                        
+                        ${movie.cast.length > 0 ? 
+                            `<div>
+                                <h3 class="font-bold mb-2">출연</h3>
+                                <p class="text-gray-300">${movie.cast.join(', ')}</p>
+                            </div>` : ''
+                        }
+                        
+                        ${movie.overview ? 
+                            `<div>
+                                <h3 class="font-bold mb-2">줄거리</h3>
+                                <p class="text-gray-300 leading-relaxed">${movie.overview}</p>
+                            </div>` : ''
+                        }
+                    </div>
+                `;
+
+                movieModal.classList.remove('hidden');
+            } catch (error) {
+                console.error('영화 정보 로드 오류:', error);
+                alert('영화 정보를 불러오는데 실패했습니다');
+            }
+        }
+
+        // 모달 닫기
+        function closeModal() {
+            movieModal.classList.add('hidden');
+        }
+
+        // 다시 선택하기
+        resetBtn.addEventListener('click', () => {
+            step2.classList.add('hidden');
+            step1.classList.remove('hidden');
+            searchInput.value = '';
+            searchResults.innerHTML = '';
+            searchStatus.textContent = '';
+        });
+
+        // ESC 키로 모달 닫기
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                closeModal();
+            }
+        });
+    </script>
+</body>
+</html>
