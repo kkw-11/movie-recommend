@@ -122,9 +122,12 @@ def get_movie_details(movie_id):
 
 @app.route('/api/recommend', methods=['POST'])
 def recommend():
-    """추천 API (새로 추가!)"""
+    """추천 API"""
     data = request.json
     selected_movie_ids = data.get('movie_ids', [])
+    
+    print(f"\n📥 추천 요청:")
+    print(f"   선택된 ID: {selected_movie_ids}")
     
     if not selected_movie_ids:
         return jsonify({'error': '영화를 선택해주세요'}), 400
@@ -135,24 +138,37 @@ def recommend():
     # 추천 받기
     recommendations = rec_engine.get_recommendations(selected_movie_ids, n=20)
     
+    # 추천 타입 결정
+    if len(recommendations) == 0:
+        # 유사도 기반 추천 실패 → 최신 인기 영화 랜덤 추천
+        print(f"   ⚠️  유사도 기반 추천 실패 → 최신 인기 영화로 대체")
+        recommendation_type = "popular"
+        recommendations = rec_engine.get_random_popular_movies(n=20)
+    else:
+        # 유사도 기반 추천 성공
+        print(f"   ✅ 유사도 기반 추천: {len(recommendations)}개")
+        recommendation_type = "similar"
+    
     # 결과 포맷팅
     result = []
     for movie in recommendations:
         result.append({
-            'id': movie['id'],
-            'title': movie['title'],
+            'id': movie.get('id'),
+            'title': movie.get('title', ''),
             'original_title': movie.get('original_title', ''),
             'overview': movie.get('overview', ''),
             'release_date': movie.get('release_date', ''),
             'vote_average': movie.get('vote_average', 0),
             'similarity_score': movie.get('similarity_score', 0),
-            'genres': [g['name'] for g in movie.get('genres', [])],
+            'genres': [g.get('name', '') for g in movie.get('genres', [])],
             'poster_path': f"https://image.tmdb.org/t/p/w500{movie['poster_path']}" if movie.get('poster_path') else None
         })
     
     return jsonify({
         'selected_count': len(selected_movie_ids),
-        'recommendations': result
+        'recommendation_type': recommendation_type,  # 추가!
+        'recommendations': result,
+        'total': len(result)
     })
 
 if __name__ == '__main__':
