@@ -1,6 +1,7 @@
 """
 추천 엔진 - scikit-learn 기반
 """
+import random 
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 import requests
@@ -152,3 +153,28 @@ class RecommendationEngine:
             if movie['id'] == movie_id:
                 return movie
         return None
+    
+    def get_random_popular_movies(self, n=20):
+        """랜덤 인기 영화 추천 (유사도 실패 시 대체)"""
+        if not self.movies:
+            return []
+        
+        # 평점 7.0 이상만
+        high_rated = [
+            movie for movie in self.movies 
+            if movie.get('vote_average', 0) >= 7.0
+        ]
+        
+        # 충분하지 않으면 전체에서
+        if len(high_rated) < n:
+            high_rated = self.movies
+        
+        # 랜덤 샘플링
+        sample_size = min(n, len(high_rated))
+        selected = random.sample(high_rated, sample_size)
+        
+        # similarity_score를 0으로 설정
+        for movie in selected:
+            movie['similarity_score'] = 0
+        
+        return selected
